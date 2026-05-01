@@ -5,8 +5,9 @@ Launch files for the Husky A200 with dual UR5e arms, Robotiq grippers, and Dynam
 `husky.launch.py` starts everything: robot_state_publisher, ros2_control_node with mock arms + dummy neck, all controller spawners, MoveIt move_group, RViz, and the VR arm teleop node.
 
 ## Run
+```
 ros2 launch husky_bringup husky.launch.py
-
+```
 ## Dependencies
 
 - [husky_description](https://github.com/DiCE-Lab-Org/husky_description)
