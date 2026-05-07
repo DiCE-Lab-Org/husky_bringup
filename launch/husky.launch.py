@@ -7,12 +7,21 @@ from launch.launch_description_sources import PythonLaunchDescriptionSource
 from launch.substitutions import LaunchConfiguration
 from launch_ros.actions import Node
 import xacro
+import yaml
+
+
+def load_yaml(package_share, *path_parts):
+    """Read a yaml file inside a package share directory and return its contents as a dict."""
+    full_path = os.path.join(package_share, *path_parts)
+    with open(full_path, "r") as f:
+        return yaml.safe_load(f)
 
 
 def launch_setup(context, *args, **kwargs):
     moveit_config_share = get_package_share_directory("husky_dual_ur_moveit_config")
 
     urdf_path = os.path.join(moveit_config_share, "config", "a200_0876.urdf.xacro")
+    srdf_path = os.path.join(moveit_config_share, "config", "a200_0876.srdf")
     rviz_config_path = os.path.join(moveit_config_share, "config", "moveit.rviz")
     ros2_controllers_path = os.path.join(moveit_config_share, "config", "ros2_controllers.yaml")
 
@@ -32,6 +41,23 @@ def launch_setup(context, *args, **kwargs):
             },
         ).toxml()
     }
+
+    # Read the SRDF for Servo (it needs robot_description_semantic).
+    with open(srdf_path, "r") as f:
+        robot_description_semantic = {"robot_description_semantic": f.read()}
+
+    # Kinematics + joint limits for Servo IK and limit enforcement.
+    kinematics_yaml = load_yaml(moveit_config_share, "config", "kinematics.yaml")
+    robot_description_kinematics = {"robot_description_kinematics": kinematics_yaml}
+
+    joint_limits_yaml = load_yaml(moveit_config_share, "config", "joint_limits.yaml")
+    robot_description_planning = {"robot_description_planning": joint_limits_yaml}
+
+    # Per-arm Servo configs.
+    servo_arm_0_yaml = load_yaml(moveit_config_share, "config", "servo_arm_0.yaml")
+    servo_arm_1_yaml = load_yaml(moveit_config_share, "config", "servo_arm_1.yaml")
+    servo_arm_0_params = {"moveit_servo": servo_arm_0_yaml}
+    servo_arm_1_params = {"moveit_servo": servo_arm_1_yaml}
 
     # Robot State Publisher
     robot_state_publisher = Node(
@@ -103,7 +129,37 @@ def launch_setup(context, *args, **kwargs):
         arguments=["-d", rviz_config_path],
     )
 
-    # Arm teleop node
+    # Two MoveIt Servo nodes, one per arm planning group.
+    # Each gets its own namespace so its topics and start service do not collide.
+    servo_node_arm_0 = Node(
+        package="moveit_servo",
+        executable="servo_node_main",
+        name="servo_node_arm_0",
+        output="screen",
+        parameters=[
+            servo_arm_0_params,
+            robot_description,
+            robot_description_semantic,
+            robot_description_kinematics,
+            robot_description_planning,
+        ],
+    )
+
+    servo_node_arm_1 = Node(
+        package="moveit_servo",
+        executable="servo_node_main",
+        name="servo_node_arm_1",
+        output="screen",
+        parameters=[
+            servo_arm_1_params,
+            robot_description,
+            robot_description_semantic,
+            robot_description_kinematics,
+            robot_description_planning,
+        ],
+    )
+
+    # Arm teleop node (Servo version - publishes TwistStamped to the Servo nodes above)
     arm_teleop_node = Node(
         package="husky_commander",
         executable="arm_teleop_node",
@@ -122,6 +178,8 @@ def launch_setup(context, *args, **kwargs):
         neck_spawner,
         move_group_launch,
         rviz_node,
+        servo_node_arm_0,
+        servo_node_arm_1,
         arm_teleop_node,
     ]
 
